@@ -1,0 +1,269 @@
+<?php
+/**
+ * @file
+ * Code for the sim_feature feature.
+ */
+
+include_once 'sim_feature.features.inc';
+
+/**
+ * Implements hook_commerce_checkout_pane_info().
+ */
+function sim_feature_commerce_checkout_pane_info() {
+  $checkout_panes = array();
+
+  $checkout_panes['pickup_content'] = array(
+    'title' => t('Pickup content'),
+    'base' => 'sim_feature_pick_content_pane',
+    'page' => 'checkout',
+    'weight' => -10,
+  );
+
+  return $checkout_panes;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function sim_feature_theme() {
+  return array(
+    'pickup_content_form' => array(
+      'render element' => 'form',
+    ),
+  );
+}
+
+/**
+ * Checkout form for the pickup delivery method.
+ */
+function sim_feature_pick_content_pane_checkout_form($form, &$form_state, $checkout_pane, $order) {
+  $pane_form = array();
+  // @TODO use the field formatters to display the values correctly (e.g. for the
+  // amount of each line item).
+  $pane_form['pickup_content']['#tree'] = TRUE;
+  $pane_form['pickup_content']['#theme'] = 'pickup_content_form';
+  $pane_form['pickup_content']['pickup_content']['message_1'] = array(
+    '#type' => 'item',
+    '#markup' => t('Explaination about the pickup mode.'),
+  );
+  $pane_form['pickup_content']['pickup_content']['option_grouped_pickup'] = array(
+    '#type' => 'radios',
+    '#title' => t('Would you like to come several time to pick your products as soon as they are ready.'),
+    '#default_value' => isset($form_state['values']['option_grouped_pickup']) ? $form_state['values']['option_grouped_pickup'] : 'yes',
+    '#options' => array(
+      'no' => t('No'),
+      'yes' => t('Yes'),
+    ),
+  );
+
+  $order_metadata = entity_metadata_wrapper('commerce_order', $order);
+  $line_items = array();
+  foreach ($order_metadata->commerce_line_items->value() as $line_item) {
+    if ($line_item->type == 'product') {
+      // Prepare each line item.
+      $line_items[] = $line_item;
+      $line_item_wrapper = entity_metadata_wrapper('commerce_line_item', $line_item);
+
+      // Extract each product.
+      $product = $line_item_wrapper->commerce_product->value();
+      $product_wrapper = entity_metadata_wrapper('commerce_product', $product);
+
+      // Structure the data that are going to be displayed.
+      $products[$product_wrapper->field_preparation_delay->value()][] = array(
+        'product' => $product,
+        'quantity' => $line_item->quantity,
+        'total' => $line_item->commerce_total,
+        'line_item_id' => $line_item->line_item_id,
+      );
+    }
+  }
+
+  // Grouped pickup.
+  $pane_form['pickup_content']['pickup_content']['grouped_pickup'] = array(
+    '#type' => 'fieldset',
+    '#states' => array('invisible' => array(':input[name="pickup_content[pickup_content][pickup_content][option_grouped_pickup]"]' => array('value' => 'yes'))),
+  );
+  $pane_form['pickup_content']['pickup_content']['grouped_pickup']['message'] = array(
+    '#markup' => t('Explaination about the grouped delivery.'),
+  );
+
+  $i = 0;
+  $header = array(t('Title'), t('Quantity'), t('Amount'));
+  foreach ($products as $delay_value => $delay_items) {
+    $row_line_item_ids = array();
+    // Iterate for every preparation delay.
+    foreach ($delay_items as $delay_item) {
+      // Prepare the quantity inputs.
+      $pane_form['pickup_content']['pickup_content']['grouped_pickup']['quantities']['quantity_' . $i] = array(
+        '#type' => 'textfield',
+        '#size' => '2',
+        '#default_value' => isset($form_state['values']['pickup_content']['pickup_content']['grouped_pickup']['quantities']['quantity_' . $i]) ? $form_state['values']['pickup_content']['pickup_content']['grouped_pickup']['quantities']['quantity_' . $i] : $delay_item['quantity'],
+      );
+      $sub_row = array(
+        $delay_item['product']->title,
+        'placeholder_split:quantity_' . $i,
+        $delay_item['total']['und'][0]['amount']
+      );
+      $i++;
+      $row_line_item_ids[] = $delay_item['line_item_id'];
+      $rows[] = array('data' => $sub_row);
+    }
+  }
+
+  // Display the list of products.
+  $pane_form['pickup_content']['pickup_content']['grouped_pickup']['element_table'] = array(
+    '#theme' => 'table',
+    '#header' => $header,
+    '#rows' => $rows,
+    '#line_item_ids' => $row_line_item_ids,
+    '#caption' => t('Products ready to be shipped'),
+  );
+  // Display a date picker the whole set of products.
+  $pane_form['pickup_content']['pickup_content']['grouped_pickup']['date_picker'] = array(
+    '#type' => 'textfield',
+    '#size' => '8',
+    '#description' => t('Pick your delivery date'),
+    '#default_value' => '2012-11-21 19:30:00',
+  );
+
+  // Split pickup.
+  $pane_form['pickup_content']['pickup_content']['split_pickup'] = array(
+    '#type' => 'fieldset',
+    '#states' => array('invisible' => array(':input[name="pickup_content[pickup_content][pickup_content][option_grouped_pickup]"]' => array('value' => 'no'))),
+  );
+  $pane_form['pickup_content']['pickup_content']['split_pickup']['information_message'] = array(
+    '#markup' => t('Explaination about the split delivery.'),
+  );
+
+  $i = 0;
+  foreach ($products as $delay_value => $delay_items) {
+    $row_line_item_ids = array();
+    $rows = array();
+    // Iterate for every preparation delay.
+    foreach($delay_items as $delay_item) {
+      // Prepare the quantity inputs.
+      $pane_form['pickup_content']['pickup_content']['split_pickup']['quantities']['quantity_' . $i] = array(
+        '#type' => 'textfield',
+        '#size' => '2',
+        '#default_value' => isset($form_state['values']['pickup_content']['pickup_content']['split_pickup']['quantities']['quantity_' . $i]) ? $form_state['values']['pickup_content']['pickup_content']['split_pickup']['quantities']['quantity_' . $i] : $delay_item['quantity'],
+      );
+      $sub_row = array(
+        $delay_item['product']->title,
+        'placeholder_split:quantity_' . $i,
+        $delay_item['total']['und'][0]['amount']
+      );
+      $i++;
+      $row_line_item_ids[] = $delay_item['line_item_id'];
+      $rows[] = array('data' => $sub_row);
+    }
+    // Display the list of products.
+    $pane_form['pickup_content']['pickup_content']['split_pickup']['form_items'][$delay_value]['element_table'] = array(
+      '#theme' => 'table',
+      '#header' => $header,
+      '#rows' => $rows,
+      '#line_item_ids' => $row_line_item_ids,
+      '#caption' => t('Products ready to be shipped within %delay', array('%delay' => $delay_value)),
+    );
+    // Display a date picker for this set of products.
+    $pane_form['pickup_content']['pickup_content']['split_pickup']['form_items'][$delay_value]['date_picker'] = array(
+      '#type' => 'textfield',
+      '#size' => '8',
+      '#description' => t('Pick your delivery date'),
+      '#default_value' => '2012-11-21 19:30:00',
+    );
+  }
+  return $pane_form;
+}
+
+/**
+ * Submit handler for the checkout builder form's save button.
+ */
+function sim_feature_pick_content_pane_checkout_form_submit($form, &$form_state, $checkout_pane, $order) {
+  $pickup = $form_state['values']['pickup_content']['pickup_content']['pickup_content'];
+  if ($pickup['option_grouped_pickup'] == 'no') {
+    dsm('Create only one shipping line item');
+  }
+  else {
+    $count = count($pickup['split_pickup']['form_items']);
+    dsm("Create $count shipping line items");
+
+    // Delete any existing shipping line items from the order.
+    commerce_shipping_delete_shipping_line_items($order, TRUE);
+
+    // Create a line item per delivery option.
+    foreach ($pickup['split_pickup']['form_items'] as $option => $date) {
+      $line_item_ids = $form['pickup_content']['pickup_content']['pickup_content']['split_pickup']['form_items'][$option]['element_table']['#line_item_ids'];
+      $delivery_date = $date['date_picker'];
+      _sim_feature_create_shipping_line_item($order, $delivery_date, $line_item_ids);
+    }
+  }
+}
+
+/**
+ * Helper to create a shipping line item on the order.
+ */
+function _sim_feature_create_shipping_line_item($order, $delivery_date, $line_items_products) {
+  // Add the business logic to merge equivalent delivery dates.
+
+  // Inspired from commerce_shipping_pane_checkout_form_submit() to create
+  // the line items.
+  $shipping_service = commerce_shipping_service_load('standard_delivery');
+
+  $base_rate = $shipping_service['base_rate'];
+
+  // Add a base price to the data array.
+  $component = array(
+    'amount' => $base_rate['amount'],
+    'currency_code' => $base_rate['currency_code'],
+    'data' => array(),
+  );
+  $price_component_type = 'flat_rate_' . 'standard_delivery';
+  $base_rate['data'] = commerce_price_component_add($base_rate, $price_component_type, $component, TRUE, FALSE);
+
+  // Create a new shipping line item with the calculated rate from the form.
+  $line_item = commerce_shipping_line_item_new('standard_delivery', $base_rate, $order->order_id);
+
+  // Add the service details to the line item's data array and the order.
+  $line_item->data['service_details'] = 'Shipping with default method';
+
+  // Set the delivery_date.
+  $line_item->field_date_livraison = array('und' => array(array('value' => $delivery_date)));
+
+  // Prepare the product line items references.
+  $field_value = array();
+  foreach ($line_items_products as $line_items_product) {
+    $field_value[] = array('line_item_id' => $line_items_product);
+  }
+  $line_item->field_products = array('und' => $field_value);
+
+  // Save and add the line item to the order.
+  commerce_shipping_add_shipping_line_item($line_item, $order, TRUE);
+}
+
+/**
+ * Theme the pickup delivery form to use a fancy render.
+ */
+function theme_pickup_content_form($variables) {
+  $form = $variables['form'];
+
+  // Hide the quantity fields.
+  hide($form['pickup_content']['split_pickup']['quantities']);
+  hide($form['pickup_content']['grouped_pickup']['quantities']);
+
+  // Render the split quantity fields in the split product table.
+  $i = 0;
+  foreach (element_children($form['pickup_content']['split_pickup']['form_items']) as $sub_form) {
+    foreach ($form['pickup_content']['split_pickup']['form_items'][$sub_form]['element_table']['#rows'] as $offset => $row) {
+      $form['pickup_content']['split_pickup']['form_items'][$sub_form]['element_table']['#rows'][$offset]['data'][1] = drupal_render($form['pickup_content']['split_pickup']['quantities']['quantity_' . $i]);
+      $i++;
+    }
+  }
+
+  // Render the grouped quantity fields in the grouped product table.
+  $i = 0;
+  foreach ($form['pickup_content']['grouped_pickup']['element_table']['#rows'] as $offset => $row) {
+    $form['pickup_content']['grouped_pickup']['element_table']['#rows'][$offset]['data'][1] = drupal_render($form['pickup_content']['grouped_pickup']['quantities']['quantity_' . $i]);
+    $i++;
+  }
+  return drupal_render($form['pickup_content']);
+}
